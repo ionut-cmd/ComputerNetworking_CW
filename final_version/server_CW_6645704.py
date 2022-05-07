@@ -28,6 +28,9 @@ TYPE_OF_MESSAGE = [
     'Send_invite',
     'Forward_invite',
     'Disconnect',
+    'Forward_invite_to_chat',
+    'Invite_to_chat',
+    'Chat',
     'ERR_SERVER_FULL',
     'ERR_USERNAME_TAKEN',
     'ERR_INVALID_FORMAT',
@@ -217,7 +220,7 @@ def parse_packet(packet):
 
 # -------------------BUILD PACKET---------------------------
 
-# method to buyld the pakets body
+# method to build the packet body
 
 
 def build_packet_formation(packet_type, message_type="", seq_no=0, content=""):
@@ -273,8 +276,7 @@ def get_file(packet, lent):
     _, _, body, _ = parse_packet(decrypt_message(packet))
     message = body.split('$;')[lent+4]
     file_content = message.join('$;')
-
-    return file_content[1:]
+    return file_content[1:-1]
 
 # -------------------GET USER LIST--------------------------
 
@@ -323,6 +325,29 @@ def analise_data(data, addr):
     data = saved_data
     pkt_type = saved_packet_type
 
+    # messenging part
+    if msg == "Invite_to_chat":
+        msg = "Forward_invite_to_chat"
+        sending_user = clients.get(addr)
+     
+        # retrive the user names to forwoard the invitation
+        send_to_user= get_body_content(data, 2)[0]
+        for addres, client in clients.items():
+            if client == send_to_user:
+                address = addres
+                packet = pkt_type, msg, ""
+                send_packet(packet, address)
+        msg = 'invitation_sent'
+
+    if msg == 'Chat':
+        send_to_user= get_body_content(data, 2)[0]
+        user_message = get_body_content(data, 2)[1]
+        for addres, client in clients.items():
+            if client == send_to_user:
+                address = addres
+        packet = pkt_type, 'Chat', user_message
+        send_packet(packet, address)
+
     # if message type is Disconect we pop the user name from the clients list
     if msg == 'Disconnect':
         print(f'Disconnected: {clients.get(addr)}')
@@ -346,6 +371,7 @@ def analise_data(data, addr):
     # check if max no of clients is reached refuse access
     if msg == 'Join_Request' and len(clients) >= MAX_CLIENTS:
         msg = 'ERR_SERVER_FULL'
+        print(f'Client list: {clients.values()}')
         # send back an error message
         return pkt_type, msg
 
@@ -443,14 +469,14 @@ def main():
     while True:
         data, addr = server.recvfrom(SIZE)
         #  code used to test for paket loss
-        '''
-        rand = random.randint(0, 7)
-        print("random number: ", rand)
-        if (rand < 4):
-            print("Packet Force Lost")
-            continue
-        print("cont random: ", rand)
-        '''
+        
+        # rand = random.randint(0, 7)
+        # print("random number: ", rand)
+        # if (rand < 4):
+        #     print("Packet Force Lost")
+        #     continue
+        # print("cont random: ", rand)
+        
         # POPULATE QUEUES
         recieving_type_queue.put(get_packet_type(data))
         recieving_checksum_queue.put(get_checksum(data))

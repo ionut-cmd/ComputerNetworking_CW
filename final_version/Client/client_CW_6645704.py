@@ -7,16 +7,19 @@ import threading
 import binascii
 import sys
 import os
+import os.path
 import time
 import random
 from queue import Queue, Empty
 import base64
 import hashlib
 from cryptography.fernet import Fernet
+from getpass import getpass
+import PySimpleGUI as sg
 
-
-# UDP_IP = "192.168.1.226"
-UDP_IP = "192.168.1.120"
+x = 0
+#UDP_IP = "192.168.1.226"
+UDP_IP = "0.0.0.0"
 # UDP_IP = "172.20.10.3"
 # UDP_IP = "10.77.68.2"
 KEY = ''
@@ -35,6 +38,7 @@ TYPE_OF_MESSAGE = [
     'Send_invite',
     'Forward_invite',
     'Disconnect',
+    'Chat',
     'ERR_SERVER_FULL',
     'ERR_USERNAME_TAKEN',
     'ERR_INVALID_FORMAT',
@@ -45,10 +49,13 @@ TYPE_OF_MESSAGE = [
     'START',
     'END',
     'DATA',
+    'Invite_to_chat',
+    'Forward_invite_to_chat'
 
 ]
 EXPECTED_USER_INPUTS = ['help', 'invite', 'quit', 'list']
 
+chat_with_user = ""
 
 saved_message = ""
 saved_data = b''
@@ -62,6 +69,15 @@ reciving_strings = [
 recieving_type_queue = Queue()
 recieving_seq_no_queue = Queue()
 recieving_checksum_queue = Queue()
+
+
+#global variables to calculate throughput between server and client
+t1=0
+t2=0
+t3=0
+#global variable to calculate RT time 
+send_time = 0
+receive_time = 0
 
 # generate encryption/decription key this code should be the same for everyone using python
 password = 'networking'
@@ -96,7 +112,7 @@ def encrypt_packet(packet):
     encrypted_packet = fernet.encrypt(packet.encode('utf-8'))
     return encrypted_packet
 
-# x = 0
+
 
 # method to create a packet
 
@@ -104,13 +120,16 @@ def encrypt_packet(packet):
 def create_packet(packet_type="data", seq_no=0, body=""):
     checksum = str(binascii.crc32(body.encode(FORMAT)) & 0xFFFFFFFF)
     packet = (f'{packet_type}|{seq_no}|{body}|{checksum}')
-
+    # global x
+    # if packet_type == 'DATA' and x == 0:
+    #     packet = packet + "1"
+    #     x = x+1
     return packet
 
-
+# method to create a corrupt packet
 '''
     global x
-    if (x == 0):
+    if packet_type == 'DATA' and x == 0:
         packet = packet + "1"
         x=x+1
 '''
@@ -176,7 +195,7 @@ def send_packet(packet, addr):
 
     ack = True
     # global variable x to test for duplcate packets
-    #x = 0
+    # x = 0
     while ack:
 
         try:
@@ -189,12 +208,12 @@ def send_packet(packet, addr):
             send_data_packet(packet, addr, start_seq_no+1)
 
             pass
-        '''
+        
         #Packet Duplication Test
-        if (x == 0):
-            send_data_packet(packet, addr, start_seq_no+1)
-            x=x+1
-        '''
+        # if (x == 0):
+        #     send_data_packet(packet, addr, start_seq_no+1)
+        #     x=x+1
+        
     ack = True
     while ack:
 
@@ -253,9 +272,11 @@ def send_end_packet(addr, seq_no):
 
 
 def send_data_packet(packet, addr, seq_no):
+    global send_time
     pack_type, mess_type, content = packet
     packet = build_packet_formation(pack_type, mess_type, seq_no, content)
     # encript and send the packet
+    send_time = time.time()
     client.sendto(encrypt_packet(packet), addr)
     print(f'PACKET SENT[Ionut Client] ----->>>>{packet}')
 
@@ -277,6 +298,11 @@ def get_message_type(packet):
     _, _, body, _ = parse_packet(decrypt_packet(packet))
     message = body.split('$;')[0]
     return message
+
+def get_data_size(packet):
+    _, _, body, _ = parse_packet(decrypt_packet(packet))
+    size = sys.getsizeof(body)
+    return size
 
 # retrive the content of body
 
@@ -318,16 +344,53 @@ def get_checksum(packet):
     _, _, _, checksum = parse_packet(decrypt_packet(packet))
     return checksum
 
+def chat_mode(pkt_type, chat_with_user):
+    chat_message = ""
+    while chat_message != 'quit':
+        chat_message = input('message: ')
+        packet = pkt_type, 'Chat', chat_with_user + " " + chat_message
+        if chat_message != 'quit':
+            send_packet(packet, ADDRESS)
+  
+
 # method to handle incomming data
 
 
 def handle_server():
+    global t1
+    global t2
+    global t3
+    global send_time
+    global receive_time
 
     connected = True
+    
+    t1 = time.time()
+
     while connected:
+        
+        
+        t2 = time.time()
         server_data = client.recv(SIZE)
+        if get_packet_type(server_data) == 'DATA':
+            receive_time = time.time()
+            # calculate throughput between server and client only for the data packets
+            bytes_received = get_data_size(server_data)
+            t3 = time.time()
+            print('Throughput:', round( bytes_received / (t3 - t1), 3), ' K/sec')
+            print('RTT: ', round(receive_time-send_time, 3), " ms")
+            t1,t2,t3 = 0,0,0
+            receive_time, send_time = 0,0
+            
+
         message = get_message_type(server_data)
         packet_type = get_packet_type(server_data)
+        
+        # method to test for packet loss
+        # rand = random.randint(1,5)
+        # if(rand < 4):
+        #     print("Packet Force Lost: ", packet_type)
+        #     continue
 
         if packet_type != "":
             # save the packet type in a queue
@@ -342,9 +405,24 @@ def handle_server():
                 server_data, packet_type, message)
             server_data = saved_data
 
+        
+
+
+
         # if all conditions are met we can connect
         if message == 'Access_Granted':
             print(f"Connected to Server: {ADDRESS[0]}, {ADDRESS[1]}")
+
+        #Chat function
+        
+        elif message == 'Forward_invite_to_chat':
+            print("-YOU ARE NOW ENTERING CHAT MODE, TYPE quit TO EXIT-")
+            data = get_body_content(server_data)
+            sending_user = " ".join(data[:1])
+            chat_thread = threading.Thread(target=chat_mode, args=(packet_type, sending_user))
+            chat_thread.start()
+
+            message = 'Waiting to recieve more data ...'
 
         # when server sends an invitation card we save it
         elif message == 'Forward_invite':
@@ -398,17 +476,33 @@ def handle_server():
 
 def main():
     connected = True
+    # create a new thread to handle incomming data
     t = threading.Thread(target=handle_server)
+    # start the thread
     t.start()
-    USER_NAME = input('Please enter a user name: ')
-    KEY = input('Please enther the password: ')
+    # start python symple gui to retrieve user name and password
+    sg.theme('DarkGreen3')     
+    layout = [
+        [sg.Text('Please enter your Name and Password')],
+        [sg.Text('Name', size =(15, 1)), sg.InputText()],
+        [sg.Text('Password', size =(15, 1)), sg.InputText(password_char='*')],
+        [sg.Submit()]
+    ]
+    
+    window = sg.Window('User Inputs', layout)
+    enevt, values = window.read()
+    window.close()
+    USER_NAME = values[0]
+    KEY = values[1]
+    # USER_NAME = input('Please enter a user name: ').casefold()
+    # KEY = getpass('Please enther the password: ')
     packet = ('DATA', 'Join_Request', USER_NAME + "$;" + KEY)
     send_packet(packet, ADDRESS)
 
     while connected:
         # allow time for a server response
         time.sleep(0.5)
-        print('/n*** please enter help if you need assistance ***/n')
+        # print('/n*** please enter help if you need assistance ***/n')
         message = input().casefold()
         # request user list from the server
         if message == 'list':
@@ -416,7 +510,7 @@ def main():
             send_packet(packet, ADDRESS)
             time.sleep(0.1)
             # print(f'TESTING PACKET SENT ----->>>>{message}')
-
+        # print instrunctions
         if message == 'help':
             print(
                 '- Invitation cards available:  \n\t * Birthday.txt\n\t * Christmas_party.txt\n\t * House_Warming.txt\n\t * Wedding.txt')
@@ -434,6 +528,15 @@ def main():
                 '- To send an invitation to all users connected please enter:  \n\t *  invite all <file_name.txt>')
             print('\n')
             print('- To disconect please enter:  \n\t *  quit')
+
+        # messageing
+        if message.startswith('message'):
+            user_name = message.split()[1]
+            global chat_with_user
+            chat_with_user = user_name
+            packet = ('DATA', "Invite_to_chat", user_name)
+            send_packet(packet, ADDRESS)
+            print(f'Invited {user_name} to a chat')
 
         # close connection with the server
         if message == 'quit':

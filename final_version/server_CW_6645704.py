@@ -378,7 +378,7 @@ def analise_data(data, addr):
     # if message is a join request and the KEY is correct allow access
     elif msg == 'Join_Request' and get_body_content(data, 2)[1] == KEY:
 
-        user_name = get_body_content(data)
+        user_name = get_body_content(data).casefold()
         # add the new user to the clients list
         clients.update({addr: user_name})
         print(f'Connected: {user_name}')

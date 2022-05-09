@@ -449,8 +449,12 @@ def handle_server():
             global CONNECTED_USERS
             # save the connected users in a global variable for later use
             CONNECTED_USERS = get_body_content(server_data)
-            # print the user list
-            print(f'UserList: {get_body_content(server_data)}')
+            # retreve the user list
+            user_list = get_body_content(server_data)
+            # Separate and capitalize all user names befor displaying 
+            user_list = [user.capitalize() for user in user_list[0].split()]
+            # display the user list
+            print(f'UserList: {user_list}')
 
         # close the connection if the user name is not available
         elif message == 'ERR_USERNAME_TAKEN':
@@ -475,6 +479,7 @@ def handle_server():
 
 
 def main():
+    global EXPECTED_USER_INPUTS
     connected = True
     # create a new thread to handle incomming data
     t = threading.Thread(target=handle_server)
@@ -492,7 +497,7 @@ def main():
     window = sg.Window('User Inputs', layout)
     enevt, values = window.read()
     window.close()
-    USER_NAME = values[0]
+    USER_NAME = values[0].casefold()
     KEY = values[1]
     # USER_NAME = input('Please enter a user name: ').casefold()
     # KEY = getpass('Please enther the password: ')
@@ -504,6 +509,11 @@ def main():
         time.sleep(0.5)
         # print('/n*** please enter help if you need assistance ***/n')
         message = input().casefold()
+        # we check the user's input, if enithing is wrong we display the help method
+        u_input = message.split()[0]
+        if u_input not in EXPECTED_USER_INPUTS:
+            message = 'help'
+
         # request user list from the server
         if message == 'list':
             packet = ('DATA', 'Request_Users_Present', "")
